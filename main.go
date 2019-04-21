@@ -155,7 +155,7 @@ func requireLogin(next http.Handler) http.Handler {
 		}
 		if session.Values["ID"] == "100571906555529103327" {
 			log.Info("lets not let Kai in as an Admin")
-			http.Error(w, "Not authorized", 401)
+			http.Error(w, fmt.Sprintf("Sorry %s, you are not allowed as an administrator.", session.Values["Name"]), 401)
 			return
 		} else {
 			log.Infof("Who is %#v ?", session.Values["Name"])

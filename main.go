@@ -26,11 +26,23 @@ var store = sessions.NewCookieStore([]byte(sessionSecret), nil)
 var views = template.Must(template.ParseGlob("templates/*.html"))
 
 func routeLog(r *http.Request) *log.Entry {
-	l := log.WithFields(log.Fields{
-		"id":   r.Header.Get("X-Request-Id"),
-		"auth": isAuthenticated(r),
+	session, err := store.Get(r, sessionName)
+	if err == nil {
+		mapString := make(map[string]string)
+		// https://stackoverflow.com/a/48226206/4534
+		for key, value := range session.Values {
+			strKey := fmt.Sprintf("%v", key)
+			strValue := fmt.Sprintf("%v", value)
+			mapString[strKey] = strValue
+		}
+		return log.WithFields(log.Fields{
+			"id":   r.Header.Get("X-Request-Id"),
+			"auth": mapString,
+		})
+	}
+	return log.WithFields(log.Fields{
+		"id": r.Header.Get("X-Request-Id"),
 	})
-	return l
 }
 
 // New describes the routes
@@ -56,6 +68,7 @@ func New() *http.ServeMux {
 }
 
 // issueSessions sets the signed cookie and redirects to /admin page
+// upon successful Google authentication
 func issueSession() http.Handler {
 	fn := func(w http.ResponseWriter, req *http.Request) {
 		ctx := req.Context()
@@ -134,38 +147,24 @@ func logoutHandler(w http.ResponseWriter, req *http.Request) {
 
 func requireLogin(next http.Handler) http.Handler {
 	fn := func(w http.ResponseWriter, req *http.Request) {
-		gAuth := isAuthenticated(req)
-		if gAuth == "" {
+		session, err := store.Get(req, sessionName)
+		// If ID is nil, we assume no Google auth has been performed
+		if err != nil || session.Values["ID"] == nil {
 			http.Redirect(w, req, "/google/login", http.StatusFound)
 			return
 		}
-		if gAuth == "100571906555529103327" {
-			log.Info("Kai is logging in")
+		if session.Values["ID"] == "100571906555529103327" {
+			log.Info("lets not let Kai in as an Admin")
+			http.Error(w, "Not authorized", 401)
+			return
 		} else {
-			log.Infof("Who is %#v", gAuth)
+			log.Infof("Who is %#v ?", session.Values["Name"])
 		}
 		next.ServeHTTP(w, req)
 	}
 	return http.HandlerFunc(fn)
 }
 
-func isAuthenticated(req *http.Request) string {
-	session, err := store.Get(req, sessionName)
-	if err != nil {
-		log.WithError(err).Fatal("failed to retrieve session")
-		return ""
-	}
-	// Q: If user id is set, we consider the person as logged in!?
-	// A: It can only be set via signed cookie, so probably OK
-	ID, ok := session.Values["ID"].(string)
-	log.Infof("ID is %v", ID)
-	if !ok {
-		return ""
-	}
-	return ID
-}
-
-// main creates and starts a Server listening.
 func main() {
 	log.SetHandler(jsonhandler.Default)
 	err := http.ListenAndServe(":"+os.Getenv("PORT"), New())

@@ -1,10 +1,10 @@
 {
-  "name": "internal-github-login",
-  "profile": "uneet-dev",
+  "name": "internal-google-login",
+  "profile": "mine",
   "stages": {
     "staging": {
-      "domain": "github.dev.unee-t.com",
-      "zone": "dev.unee-t.com"
+      "domain": "gauth.goserverless.sg",
+      "zone": "goserverless.sg"
     }
   },
   "regions": [
@@ -14,9 +14,8 @@
     "disable": true
   },
   "environment": {
-    "SESSION_SECRET": "$SESSION_SECRET",
-    "GITHUB_CLIENT_ID": "$GITHUB_CLIENT_ID",
-    "GITHUB_CLIENT_SECRET": "$GITHUB_CLIENT_SECRET",
-    "DOMAIN": "github.dev.unee-t.com"
+    "GOOGLE_CLIENT_ID": "$GOOGLE_CLIENT_ID",
+    "GOOGLE_CLIENT_SECRET": "$GOOGLE_CLIENT_SECRET",
+    "DOMAIN": "gauth.goserverless.sg"
   }
 }

@@ -16,7 +16,8 @@ import (
 )
 
 const (
-	sessionName   = "example-google-app"
+	sessionName = "internal-google-login"
+	// Q: Should I be using https://github.com/gorilla/securecookie instead?
 	sessionSecret = "example cookie signing secret"
 )
 
@@ -32,7 +33,7 @@ func routeLog(r *http.Request) *log.Entry {
 	return l
 }
 
-// New returns a new ServeMux with app routes.
+// New describes the routes
 func New() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", indexHandler)
@@ -67,7 +68,7 @@ func issueSession() http.Handler {
 		store.Options.HttpOnly = true
 		store.Options.Secure = true
 
-		log.Infof("issueSession: %#v", googleUser)
+		log.Debugf("issueSession: %#v", googleUser)
 
 		session.Values["ID"] = googleUser.Id
 		session.Values["Name"] = googleUser.Name
@@ -100,8 +101,10 @@ func adminHandler(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	log.Infof("profile, session: %#v", session.Values)
+	log.Debugf("profile, session: %#v", session.Values)
+
 	// TODO: Could we get this info into header.html?
+
 	err = views.ExecuteTemplate(w, "admin.html", session.Values)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -131,25 +134,35 @@ func logoutHandler(w http.ResponseWriter, req *http.Request) {
 
 func requireLogin(next http.Handler) http.Handler {
 	fn := func(w http.ResponseWriter, req *http.Request) {
-		if !isAuthenticated(req) {
+		gAuth := isAuthenticated(req)
+		if gAuth == "" {
 			http.Redirect(w, req, "/google/login", http.StatusFound)
 			return
+		}
+		if gAuth == "100571906555529103327" {
+			log.Info("Kai is logging in")
+		} else {
+			log.Infof("Who is %#v", gAuth)
 		}
 		next.ServeHTTP(w, req)
 	}
 	return http.HandlerFunc(fn)
 }
 
-func isAuthenticated(req *http.Request) bool {
+func isAuthenticated(req *http.Request) string {
 	session, err := store.Get(req, sessionName)
 	if err != nil {
 		log.WithError(err).Fatal("failed to retrieve session")
-		return false
+		return ""
 	}
 	// Q: If user id is set, we consider the person as logged in!?
 	// A: It can only be set via signed cookie, so probably OK
-	_, ok := session.Values["ID"]
-	return ok
+	ID, ok := session.Values["ID"].(string)
+	log.Infof("ID is %v", ID)
+	if !ok {
+		return ""
+	}
+	return ID
 }
 
 // main creates and starts a Server listening.

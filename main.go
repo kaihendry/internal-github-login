@@ -16,20 +16,18 @@ import (
 )
 
 const (
-	sessionName    = "example-google-app"
-	sessionSecret  = "example cookie signing secret"
-	sessionUserKey = "googleID"
+	sessionName   = "example-google-app"
+	sessionSecret = "example cookie signing secret"
 )
 
 // sessionStore encodes and decodes session data stored in signed cookies
 var store = sessions.NewCookieStore([]byte(sessionSecret), nil)
-
 var views = template.Must(template.ParseGlob("templates/*.html"))
 
 func routeLog(r *http.Request) *log.Entry {
 	l := log.WithFields(log.Fields{
-		"id": r.Header.Get("X-Request-Id"),
-		"ua": r.UserAgent(),
+		"id":   r.Header.Get("X-Request-Id"),
+		"auth": isAuthenticated(r),
 	})
 	return l
 }
@@ -37,11 +35,10 @@ func routeLog(r *http.Request) *log.Entry {
 // New returns a new ServeMux with app routes.
 func New() *http.ServeMux {
 	mux := http.NewServeMux()
-
-	mux.HandleFunc("/", welcomeHandler)
-	mux.Handle("/profile", requireLogin(http.HandlerFunc(profileHandler)))
+	mux.HandleFunc("/", indexHandler)
+	mux.Handle("/admin", requireLogin(http.HandlerFunc(adminHandler)))
 	mux.HandleFunc("/logout", logoutHandler)
-	// 1. Register LoginHandler and CallbackHandler
+
 	oauth2Config := &oauth2.Config{
 		ClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
 		ClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
@@ -57,8 +54,8 @@ func New() *http.ServeMux {
 	return mux
 }
 
+// issueSessions sets the signed cookie and redirects to /admin page
 func issueSession() http.Handler {
-	log.Info("issueSession")
 	fn := func(w http.ResponseWriter, req *http.Request) {
 		ctx := req.Context()
 		googleUser, err := google.UserFromContext(ctx)
@@ -69,34 +66,34 @@ func issueSession() http.Handler {
 		session, _ := store.Get(req, sessionName)
 		store.Options.HttpOnly = true
 		store.Options.Secure = true
-		session.Values[sessionUserKey] = googleUser.Id
+
+		log.Infof("issueSession: %#v", googleUser)
+
+		session.Values["ID"] = googleUser.Id
+		session.Values["Name"] = googleUser.Name
+
 		err = session.Save(req, w)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		http.Redirect(w, req, "/profile", http.StatusFound)
+		http.Redirect(w, req, "/admin", http.StatusFound)
 	}
 	return http.HandlerFunc(fn)
 }
 
-func welcomeHandler(w http.ResponseWriter, req *http.Request) {
+func indexHandler(w http.ResponseWriter, req *http.Request) {
 	log := routeLog(req)
-	if req.URL.Path != "/" {
-		http.NotFound(w, req)
+	log.Info("index")
+	err := views.ExecuteTemplate(w, "index.html", nil)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if isAuthenticated(req) {
-		log.Info("authenticated")
-		http.Redirect(w, req, "/profile", http.StatusFound)
-		return
-	}
-	log.Warn("unauthenticated")
-	views.ExecuteTemplate(w, "home.html", nil)
 }
 
-// profileHandler shows protected user content.
-func profileHandler(w http.ResponseWriter, req *http.Request) {
+// adminHandler is for the admin only
+func adminHandler(w http.ResponseWriter, req *http.Request) {
 	log := routeLog(req)
 	session, err := store.Get(req, sessionName)
 	if err != nil {
@@ -104,14 +101,18 @@ func profileHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	log.Infof("profile, session: %#v", session.Values)
-	views.ExecuteTemplate(w, "profile.html", session.Values)
-
+	// TODO: Could we get this info into header.html?
+	err = views.ExecuteTemplate(w, "admin.html", session.Values)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
 
-// logoutHandler destroys the session on POSTs and redirects to home.
+// logoutHandler kills the cookie
 func logoutHandler(w http.ResponseWriter, req *http.Request) {
-	log := routeLog(req)
 	if req.Method == "POST" {
+		log := routeLog(req)
 		session, err := store.Get(req, sessionName)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -123,7 +124,6 @@ func logoutHandler(w http.ResponseWriter, req *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
 		log.Info("deleting cookie")
 	}
 	http.Redirect(w, req, "/", http.StatusFound)
@@ -132,7 +132,7 @@ func logoutHandler(w http.ResponseWriter, req *http.Request) {
 func requireLogin(next http.Handler) http.Handler {
 	fn := func(w http.ResponseWriter, req *http.Request) {
 		if !isAuthenticated(req) {
-			http.Redirect(w, req, "/", http.StatusFound)
+			http.Redirect(w, req, "/google/login", http.StatusFound)
 			return
 		}
 		next.ServeHTTP(w, req)
@@ -141,16 +141,14 @@ func requireLogin(next http.Handler) http.Handler {
 }
 
 func isAuthenticated(req *http.Request) bool {
-	log := routeLog(req)
 	session, err := store.Get(req, sessionName)
 	if err != nil {
 		log.WithError(err).Fatal("failed to retrieve session")
 		return false
 	}
-	log.Infof("Session: %#v", session)
 	// Q: If user id is set, we consider the person as logged in!?
 	// A: It can only be set via signed cookie, so probably OK
-	_, ok := session.Values[sessionUserKey]
+	_, ok := session.Values["ID"]
 	return ok
 }
 

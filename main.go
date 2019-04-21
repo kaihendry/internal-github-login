@@ -15,14 +15,10 @@ import (
 	googleOAuth2 "golang.org/x/oauth2/google"
 )
 
-const (
-	sessionName = "internal-google-login"
-	// Q: Should I be using https://github.com/gorilla/securecookie instead?
-	sessionSecret = "example cookie signing secret"
-)
+const sessionName = "internal-google-login"
 
 // sessionStore encodes and decodes session data stored in signed cookies
-var store = sessions.NewCookieStore([]byte(sessionSecret), nil)
+var store = sessions.NewCookieStore([]byte(os.Getenv("SESSION_SECRET")), nil)
 var views = template.Must(template.ParseGlob("templates/*.html"))
 
 func routeLog(r *http.Request) *log.Entry {

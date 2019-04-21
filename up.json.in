@@ -16,6 +16,7 @@
   "environment": {
     "GOOGLE_CLIENT_ID": "$GOOGLE_CLIENT_ID",
     "GOOGLE_CLIENT_SECRET": "$GOOGLE_CLIENT_SECRET",
+    "SESSION_SECRET": "$SESSION_SECRET",
     "DOMAIN": "gauth.goserverless.sg"
   }
 }

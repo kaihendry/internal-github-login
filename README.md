@@ -1,4 +1,9 @@
-Example from https://github.com/dghubble/gologin/tree/master/examples/google modifications.
+Example from https://github.com/dghubble/gologin/tree/master/examples/google
+modifications.
+
+When deploying in production I assume you have UP_STAGE set. I assume it is
+unset locally to toggle secure cookie features, since again I assume up develop
+locally with [gin](https://github.com/codegangsta/gin) on **localhost:3000**.
 
 # .env
 

@@ -1,7 +1,7 @@
-{{template "header"}}
+{{template "header" . }}
 
 <h2>Administrator page {{ .ID }}</h2>
-<p>Hi {{ .Name }}</p>
+<p>Hi {{ .Name }} 👋</p>
 
 <form action="/logout" method="post">
 <input type="submit" value="Logout">

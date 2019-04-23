@@ -10,7 +10,7 @@ import (
 func TestRoutes(t *testing.T) {
 	r := gofight.New()
 	r.GET("/admin").
-		Run(New(), func(r gofight.HTTPResponse, rq gofight.HTTPRequest) {
+		Run(BasicEngine(), func(r gofight.HTTPResponse, rq gofight.HTTPRequest) {
 			assert.Contains(t, r.Body.String(), "/google/login")
 		})
 }

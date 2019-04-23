@@ -10,6 +10,7 @@ import (
 	jsonhandler "github.com/apex/log/handlers/json"
 	"github.com/dghubble/gologin"
 	"github.com/dghubble/gologin/google"
+	"github.com/gorilla/mux"
 	"github.com/gorilla/sessions"
 	"golang.org/x/oauth2"
 	googleOAuth2 "golang.org/x/oauth2/google"
@@ -36,19 +37,20 @@ func logWithContext(r *http.Request) *log.Entry {
 			"auth":      mapString,
 		})
 	}
+	// You only see "X-Request-Id" in a lambda/API gateway env btw
 	return log.WithFields(log.Fields{
 		"id": r.Header.Get("X-Request-Id"),
 	})
 }
 
-// New describes the routes
-func New() *http.ServeMux {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", indexHandler)
-	mux.Handle("/admin", requireLogin(http.HandlerFunc(adminHandler)))
-	mux.HandleFunc("/logout", logoutHandler)
+// BasicEngine sets up the routes
+func BasicEngine() http.Handler {
+	app := mux.NewRouter()
+	app.HandleFunc("/", indexHandler)
+	app.Handle("/admin", requireLogin(http.HandlerFunc(adminHandler)))
+	app.HandleFunc("/logout", logoutHandler)
 
-	// Setup for local development
+	// Setup for local development with gin
 	redirectURL := "http://localhost:3000/google/callback"
 	stateConfig := gologin.DebugOnlyCookieConfig
 	// When deployed with UP
@@ -65,9 +67,9 @@ func New() *http.ServeMux {
 		Scopes:       []string{"profile", "email"},
 	}
 
-	mux.Handle("/google/login", google.StateHandler(stateConfig, google.LoginHandler(oauth2Config, nil)))
-	mux.Handle("/google/callback", google.StateHandler(stateConfig, google.CallbackHandler(oauth2Config, issueSession(), nil)))
-	return mux
+	app.Handle("/google/login", google.StateHandler(stateConfig, google.LoginHandler(oauth2Config, nil)))
+	app.Handle("/google/callback", google.StateHandler(stateConfig, google.CallbackHandler(oauth2Config, issueSession(), nil)))
+	return app
 }
 
 // issueSession sets the signed cookie and redirects to /admin page
@@ -107,15 +109,16 @@ func issueSession() http.Handler {
 
 func indexHandler(w http.ResponseWriter, req *http.Request) {
 	logs := logWithContext(req)
+	session, _ := store.Get(req, sessionName)
 	logs.Info("index")
-	err := views.ExecuteTemplate(w, "index.html", nil)
+	err := views.ExecuteTemplate(w, "index.html", session.Values)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 }
 
-// adminHandler is for the admin only
+// adminHandler is for the admin only, requireLogin should be set in routes
 func adminHandler(w http.ResponseWriter, req *http.Request) {
 	logs := logWithContext(req)
 	session, err := store.Get(req, sessionName)
@@ -174,7 +177,7 @@ func requireLogin(next http.Handler) http.Handler {
 
 func main() {
 	log.SetHandler(jsonhandler.Default)
-	err := http.ListenAndServe(":"+os.Getenv("PORT"), New())
+	err := http.ListenAndServe(":"+os.Getenv("PORT"), BasicEngine())
 	if err != nil {
 		log.WithError(err).Fatal("error listening")
 	}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/apex/log"
 	jsonhandler "github.com/apex/log/handlers/json"
+	texthandler "github.com/apex/log/handlers/text"
 	"github.com/dghubble/gologin"
 	"github.com/dghubble/gologin/google"
 	"github.com/gorilla/mux"
@@ -23,7 +24,11 @@ var store = sessions.NewCookieStore([]byte(os.Getenv("SESSION_SECRET")), nil)
 var views = template.Must(template.ParseGlob("templates/*.html"))
 
 func main() {
-	log.SetHandler(jsonhandler.Default)
+	if os.Getenv("UP_STAGE") != "" {
+		log.SetHandler(jsonhandler.Default)
+	} else {
+		log.SetHandler(texthandler.Default)
+	}
 	err := http.ListenAndServe(":"+os.Getenv("PORT"), BasicEngine())
 	if err != nil {
 		log.WithError(err).Fatal("error listening")
@@ -60,6 +65,12 @@ func BasicEngine() http.Handler {
 }
 
 func logWithContext(r *http.Request) *log.Entry {
+	logs := log.WithField("", "")
+	if os.Getenv("UP_STAGE") != "" {
+		logs = log.WithFields(log.Fields{
+			"id": r.Header.Get("X-Request-Id"),
+		})
+	}
 	session, err := store.Get(r, sessionName)
 	if err == nil {
 		mapString := make(map[string]string)
@@ -69,15 +80,11 @@ func logWithContext(r *http.Request) *log.Entry {
 			strValue := fmt.Sprintf("%v", value)
 			mapString[strKey] = strValue
 		}
-		return log.WithFields(log.Fields{
-			"requestid": r.Header.Get("X-Request-Id"),
-			"auth":      mapString,
+		return logs.WithFields(log.Fields{
+			"auth": mapString,
 		})
 	}
-	// You only see "X-Request-Id" in a lambda/API gateway env btw
-	return log.WithFields(log.Fields{
-		"id": r.Header.Get("X-Request-Id"),
-	})
+	return logs
 }
 
 // issueSession sets the signed cookie and redirects to /admin page
@@ -91,7 +98,11 @@ func issueSession() http.Handler {
 			return
 		}
 
-		session, _ := store.Get(req, sessionName)
+		session, err := store.Get(req, sessionName)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 
 		store.Options.HttpOnly = true
 
@@ -117,9 +128,14 @@ func issueSession() http.Handler {
 
 func indexHandler(w http.ResponseWriter, req *http.Request) {
 	logs := logWithContext(req)
-	session, _ := store.Get(req, sessionName)
+	session, err := store.Get(req, sessionName)
+	if err != nil {
+		log.WithError(err).Error("bad cookie")
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	logs.Info("index")
-	err := views.ExecuteTemplate(w, "index.html", session.Values)
+	err = views.ExecuteTemplate(w, "index.html", session.Values)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -131,13 +147,12 @@ func adminHandler(w http.ResponseWriter, req *http.Request) {
 	logs := logWithContext(req)
 	session, err := store.Get(req, sessionName)
 	if err != nil {
+		log.WithError(err).Error("bad cookie")
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	logs.Debugf("profile, session: %#v", session.Values)
-
 	logs.Info("admin")
-
 	err = views.ExecuteTemplate(w, "admin.html", session.Values)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

@@ -22,25 +22,12 @@ const sessionName = "internal-google-login"
 var store = sessions.NewCookieStore([]byte(os.Getenv("SESSION_SECRET")), nil)
 var views = template.Must(template.ParseGlob("templates/*.html"))
 
-func logWithContext(r *http.Request) *log.Entry {
-	session, err := store.Get(r, sessionName)
-	if err == nil {
-		mapString := make(map[string]string)
-		// https://stackoverflow.com/a/48226206/4534
-		for key, value := range session.Values {
-			strKey := fmt.Sprintf("%v", key)
-			strValue := fmt.Sprintf("%v", value)
-			mapString[strKey] = strValue
-		}
-		return log.WithFields(log.Fields{
-			"requestid": r.Header.Get("X-Request-Id"),
-			"auth":      mapString,
-		})
+func main() {
+	log.SetHandler(jsonhandler.Default)
+	err := http.ListenAndServe(":"+os.Getenv("PORT"), BasicEngine())
+	if err != nil {
+		log.WithError(err).Fatal("error listening")
 	}
-	// You only see "X-Request-Id" in a lambda/API gateway env btw
-	return log.WithFields(log.Fields{
-		"id": r.Header.Get("X-Request-Id"),
-	})
 }
 
 // BasicEngine sets up the routes
@@ -70,6 +57,27 @@ func BasicEngine() http.Handler {
 	app.Handle("/google/login", google.StateHandler(stateConfig, google.LoginHandler(oauth2Config, nil)))
 	app.Handle("/google/callback", google.StateHandler(stateConfig, google.CallbackHandler(oauth2Config, issueSession(), nil)))
 	return app
+}
+
+func logWithContext(r *http.Request) *log.Entry {
+	session, err := store.Get(r, sessionName)
+	if err == nil {
+		mapString := make(map[string]string)
+		// https://stackoverflow.com/a/48226206/4534
+		for key, value := range session.Values {
+			strKey := fmt.Sprintf("%v", key)
+			strValue := fmt.Sprintf("%v", value)
+			mapString[strKey] = strValue
+		}
+		return log.WithFields(log.Fields{
+			"requestid": r.Header.Get("X-Request-Id"),
+			"auth":      mapString,
+		})
+	}
+	// You only see "X-Request-Id" in a lambda/API gateway env btw
+	return log.WithFields(log.Fields{
+		"id": r.Header.Get("X-Request-Id"),
+	})
 }
 
 // issueSession sets the signed cookie and redirects to /admin page
@@ -173,12 +181,4 @@ func requireLogin(next http.Handler) http.Handler {
 		next.ServeHTTP(w, req)
 	}
 	return http.HandlerFunc(fn)
-}
-
-func main() {
-	log.SetHandler(jsonhandler.Default)
-	err := http.ListenAndServe(":"+os.Getenv("PORT"), BasicEngine())
-	if err != nil {
-		log.WithError(err).Fatal("error listening")
-	}
 }

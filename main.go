@@ -48,23 +48,29 @@ func New() *http.ServeMux {
 	mux.Handle("/admin", requireLogin(http.HandlerFunc(adminHandler)))
 	mux.HandleFunc("/logout", logoutHandler)
 
+	// Setup for local development
+	redirectURL := "http://localhost:3000/google/callback"
+	stateConfig := gologin.DebugOnlyCookieConfig
+	// When deployed with UP
+	if os.Getenv("UP_STAGE") != "" {
+		redirectURL = fmt.Sprintf("https://%s/google/callback", os.Getenv("DOMAIN"))
+		stateConfig = gologin.DefaultCookieConfig
+	}
+
 	oauth2Config := &oauth2.Config{
 		ClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
 		ClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
-		// RedirectURL:  "http://localhost:3000/google/callback",
-		RedirectURL: fmt.Sprintf("https://%s/google/callback", os.Getenv("DOMAIN")),
-		Endpoint:    googleOAuth2.Endpoint,
-		Scopes:      []string{"profile", "email"},
+		RedirectURL:  redirectURL,
+		Endpoint:     googleOAuth2.Endpoint,
+		Scopes:       []string{"profile", "email"},
 	}
 
-	stateConfig := gologin.DefaultCookieConfig
-	// stateConfig := gologin.DebugOnlyCookieConfig // only when local
 	mux.Handle("/google/login", google.StateHandler(stateConfig, google.LoginHandler(oauth2Config, nil)))
 	mux.Handle("/google/callback", google.StateHandler(stateConfig, google.CallbackHandler(oauth2Config, issueSession(), nil)))
 	return mux
 }
 
-// issueSessions sets the signed cookie and redirects to /admin page
+// issueSession sets the signed cookie and redirects to /admin page
 // upon successful Google authentication
 func issueSession() http.Handler {
 	fn := func(w http.ResponseWriter, req *http.Request) {
@@ -74,9 +80,15 @@ func issueSession() http.Handler {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+
 		session, _ := store.Get(req, sessionName)
+
 		store.Options.HttpOnly = true
-		store.Options.Secure = true // disable when local
+
+		if os.Getenv("UP_STAGE") != "" {
+			log.Info("setting secure cookie")
+			store.Options.Secure = true
+		}
 
 		log.Debugf("issueSession: %#v", googleUser)
 
@@ -94,8 +106,8 @@ func issueSession() http.Handler {
 }
 
 func indexHandler(w http.ResponseWriter, req *http.Request) {
-	log := logWithContext(req)
-	log.Info("index")
+	logs := logWithContext(req)
+	logs.Info("index")
 	err := views.ExecuteTemplate(w, "index.html", nil)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -105,15 +117,15 @@ func indexHandler(w http.ResponseWriter, req *http.Request) {
 
 // adminHandler is for the admin only
 func adminHandler(w http.ResponseWriter, req *http.Request) {
-	log := logWithContext(req)
+	logs := logWithContext(req)
 	session, err := store.Get(req, sessionName)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	log.Debugf("profile, session: %#v", session.Values)
+	logs.Debugf("profile, session: %#v", session.Values)
 
-	log.Info("admin")
+	logs.Info("admin")
 
 	err = views.ExecuteTemplate(w, "admin.html", session.Values)
 	if err != nil {
@@ -124,7 +136,7 @@ func adminHandler(w http.ResponseWriter, req *http.Request) {
 
 // logoutHandler kills the cookie
 func logoutHandler(w http.ResponseWriter, req *http.Request) {
-	log := logWithContext(req)
+	logs := logWithContext(req)
 	session, err := store.Get(req, sessionName)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -136,7 +148,7 @@ func logoutHandler(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	log.Info("deleting cookie")
+	logs.Info("logout: deleted cookie")
 	http.Redirect(w, req, "/", http.StatusFound)
 }
 

@@ -20,7 +20,10 @@ import (
 const sessionName = "internal-google-login"
 
 // sessionStore encodes and decodes session data stored in signed cookies
+
+// var store = sessions.NewFilesystemStore("foobar", []byte(os.Getenv("SESSION_SECRET")))
 var store = sessions.NewCookieStore([]byte(os.Getenv("SESSION_SECRET")), nil)
+
 var views = template.Must(template.ParseGlob("templates/*.html"))
 
 func main() {
@@ -130,9 +133,8 @@ func indexHandler(w http.ResponseWriter, req *http.Request) {
 	logs := logWithContext(req)
 	session, err := store.Get(req, sessionName)
 	if err != nil {
-		log.WithError(err).Error("bad cookie")
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		log.WithError(err).Error("bad session")
+		http.SetCookie(w, &http.Cookie{Name: sessionName, MaxAge: -1, Path: "/"})
 	}
 	logs.Info("index")
 	err = views.ExecuteTemplate(w, "index.html", session.Values)
@@ -147,7 +149,7 @@ func adminHandler(w http.ResponseWriter, req *http.Request) {
 	logs := logWithContext(req)
 	session, err := store.Get(req, sessionName)
 	if err != nil {
-		log.WithError(err).Error("bad cookie")
+		log.WithError(err).Error("bad session")
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -165,14 +167,12 @@ func logoutHandler(w http.ResponseWriter, req *http.Request) {
 	logs := logWithContext(req)
 	session, err := store.Get(req, sessionName)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		log.WithError(err).Error("unable to retrieve cookie")
 	}
 	session.Options.MaxAge = -1
 	err = session.Save(req, w)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		log.WithError(err).Error("unable to remove cookie")
 	}
 	logs.Info("logout: deleted cookie")
 	http.Redirect(w, req, "/", http.StatusFound)

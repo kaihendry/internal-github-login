@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -20,8 +21,6 @@ import (
 const sessionName = "internal-google-login"
 
 // sessionStore encodes and decodes session data stored in signed cookies
-
-// var store = sessions.NewFilesystemStore("foobar", []byte(os.Getenv("SESSION_SECRET")))
 var store = sessions.NewCookieStore([]byte(os.Getenv("SESSION_SECRET")), nil)
 
 var views = template.Must(template.ParseGlob("templates/*.html"))
@@ -41,8 +40,8 @@ func main() {
 // BasicEngine sets up the routes
 func BasicEngine() http.Handler {
 	app := mux.NewRouter()
-	app.HandleFunc("/", indexHandler)
-	app.Handle("/admin", requireLogin(http.HandlerFunc(adminHandler)))
+	app.HandleFunc("/", sessionMiddleware(indexHandler))
+	app.HandleFunc("/admin", requireLogin(sessionMiddleware(adminHandler)))
 	app.HandleFunc("/logout", logoutHandler)
 
 	// Setup for local development with gin
@@ -131,59 +130,61 @@ func issueSession() http.Handler {
 
 func indexHandler(w http.ResponseWriter, req *http.Request) {
 	logs := logWithContext(req)
-	session, err := store.Get(req, sessionName)
-	if err != nil {
-		log.WithError(err).Error("bad session")
-		http.SetCookie(w, &http.Cookie{Name: sessionName, MaxAge: -1, Path: "/"})
-	}
+	session := req.Context().Value("session").(*sessions.Session)
 	logs.Info("index")
-	err = views.ExecuteTemplate(w, "index.html", session.Values)
+	err := views.ExecuteTemplate(w, "index.html",
+		struct {
+			Session map[interface{}]interface{}
+		}{
+			session.Values,
+		})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 }
 
-// adminHandler is for the admin only, requireLogin should be set in routes
 func adminHandler(w http.ResponseWriter, req *http.Request) {
 	logs := logWithContext(req)
-	session, err := store.Get(req, sessionName)
-	if err != nil {
-		log.WithError(err).Error("bad session")
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
+	session := req.Context().Value("session").(*sessions.Session)
 	logs.Debugf("profile, session: %#v", session.Values)
 	logs.Info("admin")
-	err = views.ExecuteTemplate(w, "admin.html", session.Values)
+	err := views.ExecuteTemplate(w, "admin.html",
+		struct {
+			Session map[interface{}]interface{}
+		}{
+			session.Values,
+		})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 }
 
-// logoutHandler kills the cookie
+// logoutHandler kills the cookie and session
 func logoutHandler(w http.ResponseWriter, req *http.Request) {
 	logs := logWithContext(req)
 	session, err := store.Get(req, sessionName)
 	if err != nil {
-		log.WithError(err).Error("unable to retrieve cookie")
+		log.WithError(err).Error("unable to retrieve session cookie")
 	}
 	session.Options.MaxAge = -1
 	err = session.Save(req, w)
 	if err != nil {
-		log.WithError(err).Error("unable to remove cookie")
+		log.WithError(err).Error("unable to delete session cookie")
 	}
-	logs.Info("logout: deleted cookie")
+	logs.Info("logout: deleted session cookie")
 	http.Redirect(w, req, "/", http.StatusFound)
 }
 
-func requireLogin(next http.Handler) http.Handler {
-	fn := func(w http.ResponseWriter, req *http.Request) {
-		session, err := store.Get(req, sessionName)
-		// If ID is nil, we assume no Google auth has been performed
+// <schaeffer> hendry: you should generally take an http.Handler, as http.HandlerFunc implements http.Handler whereas the inverse isn't true
+// func requireLogin(next http.Handler) http.Handler {
+func requireLogin(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		session, err := store.Get(r, sessionName)
+		// If ID is nil, we assume Google auth has NOT been performed
 		if err != nil || session.Values["ID"] == nil {
-			http.Redirect(w, req, "/google/login", http.StatusFound)
+			http.Redirect(w, r, "/google/login", http.StatusFound)
 			return
 		}
 		// if session.Values["ID"] == "100571906555529103327" {
@@ -193,7 +194,19 @@ func requireLogin(next http.Handler) http.Handler {
 		// } else {
 		// 	log.Infof("Who is %#v ?", session.Values["Name"])
 		// }
-		next.ServeHTTP(w, req)
+		h(w, r)
 	}
-	return http.HandlerFunc(fn)
+}
+
+func sessionMiddleware(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		session, err := store.Get(r, sessionName)
+		if err != nil {
+			log.WithError(err).Error("bad session")
+			http.SetCookie(w, &http.Cookie{Name: sessionName, MaxAge: -1, Path: "/"})
+			return
+		}
+		r = r.WithContext(context.WithValue(r.Context(), "session", session))
+		h(w, r)
+	}
 }

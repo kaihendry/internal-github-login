@@ -3,7 +3,7 @@
 <html lang=en>
 <head>
 <meta charset="utf-8">
-<title>internal-google-login {{ .ID }}</title>
+<title>internal-google-login</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <link rel="icon" href="data:;base64,iVBORw0KGgo=">
 <style>
@@ -17,4 +17,8 @@ border-radius: 0;
 }
 </style>
 </head>
+{{ if .Session.Name }}
+<p>Logged in as: {{ .Session.Name }} 👋</p>
+{{ end }}
+
 {{end}}

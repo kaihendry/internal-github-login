@@ -20,6 +20,10 @@ import (
 
 const sessionName = "internal-google-login"
 
+type ctxKey string
+
+var myKey1 ctxKey = sessionName
+
 // sessionStore encodes and decodes session data stored in signed cookies
 var store = sessions.NewCookieStore([]byte(os.Getenv("SESSION_SECRET")), nil)
 
@@ -44,7 +48,7 @@ func BasicEngine() http.Handler {
 	app.HandleFunc("/admin", requireLogin(sessionMiddleware(adminHandler)))
 	app.HandleFunc("/logout", logoutHandler)
 
-	// Setup for local development with gin
+	// Setup for local development with https://github.com/codegangsta/gin
 	redirectURL := "http://localhost:3000/google/callback"
 	stateConfig := gologin.DebugOnlyCookieConfig
 	// When deployed with UP
@@ -67,16 +71,17 @@ func BasicEngine() http.Handler {
 }
 
 func logWithContext(r *http.Request) *log.Entry {
-	logs := log.WithField("", "")
+	logs := log.WithField("", "") // not sure how to initialise logs otherwise
 	if os.Getenv("UP_STAGE") != "" {
 		logs = log.WithFields(log.Fields{
 			"id": r.Header.Get("X-Request-Id"),
 		})
 	}
+	// This could be retrieved from context
 	session, err := store.Get(r, sessionName)
 	if err == nil {
-		mapString := make(map[string]string)
 		// https://stackoverflow.com/a/48226206/4534
+		mapString := make(map[string]string)
 		for key, value := range session.Values {
 			strKey := fmt.Sprintf("%v", key)
 			strValue := fmt.Sprintf("%v", value)
@@ -130,7 +135,7 @@ func issueSession() http.Handler {
 
 func indexHandler(w http.ResponseWriter, req *http.Request) {
 	logs := logWithContext(req)
-	session := req.Context().Value("session").(*sessions.Session)
+	session := req.Context().Value(myKey1).(*sessions.Session)
 	logs.Info("index")
 	err := views.ExecuteTemplate(w, "index.html",
 		struct {
@@ -146,7 +151,7 @@ func indexHandler(w http.ResponseWriter, req *http.Request) {
 
 func adminHandler(w http.ResponseWriter, req *http.Request) {
 	logs := logWithContext(req)
-	session := req.Context().Value("session").(*sessions.Session)
+	session := req.Context().Value(myKey1).(*sessions.Session)
 	logs.Debugf("profile, session: %#v", session.Values)
 	logs.Info("admin")
 	err := views.ExecuteTemplate(w, "admin.html",
@@ -206,7 +211,7 @@ func sessionMiddleware(h http.HandlerFunc) http.HandlerFunc {
 			http.SetCookie(w, &http.Cookie{Name: sessionName, MaxAge: -1, Path: "/"})
 			return
 		}
-		r = r.WithContext(context.WithValue(r.Context(), "session", session))
+		r = r.WithContext(context.WithValue(r.Context(), myKey1, session))
 		h(w, r)
 	}
 }

@@ -22,7 +22,8 @@ const sessionName = "internal-google-login"
 
 type ctxKey string
 
-var myKey1 ctxKey = sessionName
+var sessionKey ctxKey = sessionName
+var logKey ctxKey = "logWithRequestID"
 
 // sessionStore encodes and decodes session data stored in signed cookies
 var store = sessions.NewCookieStore([]byte(os.Getenv("SESSION_SECRET")), nil)
@@ -44,9 +45,9 @@ func main() {
 // BasicEngine sets up the routes
 func BasicEngine() http.Handler {
 	app := mux.NewRouter()
-	app.HandleFunc("/", sessionMiddleware(indexHandler))
-	app.HandleFunc("/admin", requireLogin(sessionMiddleware(adminHandler)))
-	app.HandleFunc("/logout", logoutHandler)
+	app.HandleFunc("/", loggingMiddleware(sessionMiddleware(indexHandler)))
+	app.HandleFunc("/admin", loggingMiddleware(requireLogin(sessionMiddleware(adminHandler))))
+	app.HandleFunc("/logout", loggingMiddleware(logoutHandler))
 
 	// Setup for local development with https://github.com/codegangsta/gin
 	redirectURL := "http://localhost:3000/google/callback"
@@ -70,32 +71,7 @@ func BasicEngine() http.Handler {
 	return app
 }
 
-func logWithContext(r *http.Request) *log.Entry {
-	logs := log.WithField("", "") // not sure how to initialise logs otherwise
-	if os.Getenv("UP_STAGE") != "" {
-		logs = log.WithFields(log.Fields{
-			"id": r.Header.Get("X-Request-Id"),
-		})
-	}
-	// This could be retrieved from context
-	session, err := store.Get(r, sessionName)
-	if err == nil {
-		// https://stackoverflow.com/a/48226206/4534
-		mapString := make(map[string]string)
-		for key, value := range session.Values {
-			strKey := fmt.Sprintf("%v", key)
-			strValue := fmt.Sprintf("%v", value)
-			mapString[strKey] = strValue
-		}
-		return logs.WithFields(log.Fields{
-			"auth": mapString,
-		})
-	}
-	return logs
-}
-
-// issueSession sets the signed cookie and redirects to /admin page
-// upon successful Google authentication
+// issueSession sets the signed cookie and redirects to /admin page upon successful Google authentication
 func issueSession() http.Handler {
 	fn := func(w http.ResponseWriter, req *http.Request) {
 		ctx := req.Context()
@@ -134,8 +110,8 @@ func issueSession() http.Handler {
 }
 
 func indexHandler(w http.ResponseWriter, req *http.Request) {
-	logs := logWithContext(req)
-	session := req.Context().Value(myKey1).(*sessions.Session)
+	logs := req.Context().Value(logKey).(*log.Entry)
+	session := req.Context().Value(sessionKey).(*sessions.Session)
 	logs.Info("index")
 	err := views.ExecuteTemplate(w, "index.html",
 		struct {
@@ -150,8 +126,8 @@ func indexHandler(w http.ResponseWriter, req *http.Request) {
 }
 
 func adminHandler(w http.ResponseWriter, req *http.Request) {
-	logs := logWithContext(req)
-	session := req.Context().Value(myKey1).(*sessions.Session)
+	logs := req.Context().Value(logKey).(*log.Entry)
+	session := req.Context().Value(sessionKey).(*sessions.Session)
 	logs.Debugf("profile, session: %#v", session.Values)
 	logs.Info("admin")
 	err := views.ExecuteTemplate(w, "admin.html",
@@ -168,7 +144,7 @@ func adminHandler(w http.ResponseWriter, req *http.Request) {
 
 // logoutHandler kills the cookie and session
 func logoutHandler(w http.ResponseWriter, req *http.Request) {
-	logs := logWithContext(req)
+	logs := req.Context().Value(logKey).(*log.Entry)
 	session, err := store.Get(req, sessionName)
 	if err != nil {
 		log.WithError(err).Error("unable to retrieve session cookie")
@@ -211,7 +187,41 @@ func sessionMiddleware(h http.HandlerFunc) http.HandlerFunc {
 			http.SetCookie(w, &http.Cookie{Name: sessionName, MaxAge: -1, Path: "/"})
 			return
 		}
-		r = r.WithContext(context.WithValue(r.Context(), myKey1, session))
+		r = r.WithContext(context.WithValue(r.Context(), sessionKey, session))
 		h(w, r)
 	}
 }
+
+func loggingMiddleware(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		logs := log.WithFields(log.Fields{
+			"id": r.Header.Get("X-Request-Id"),
+		})
+		r = r.WithContext(context.WithValue(r.Context(), logKey, logs))
+		h(w, r)
+	}
+}
+
+// func logWithContext(r *http.Request) *log.Entry {
+// 	logs := log.WithField("", "") // not sure how to initialise logs otherwise
+// 	if os.Getenv("UP_STAGE") != "" {
+// 		logs = log.WithFields(log.Fields{
+// 			"id": r.Header.Get("X-Request-Id"),
+// 		})
+// 	}
+// 	// This could be retrieved from context
+// 	session, err := store.Get(r, sessionName)
+// 	if err == nil {
+// 		// https://stackoverflow.com/a/48226206/4534
+// 		mapString := make(map[string]string)
+// 		for key, value := range session.Values {
+// 			strKey := fmt.Sprintf("%v", key)
+// 			strValue := fmt.Sprintf("%v", value)
+// 			mapString[strKey] = strValue
+// 		}
+// 		return logs.WithFields(log.Fields{
+// 			"auth": mapString,
+// 		})
+// 	}
+// 	return logs
+// }

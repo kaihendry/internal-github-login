@@ -181,6 +181,7 @@ func requireLogin(h http.HandlerFunc) http.HandlerFunc {
 
 func sessionMiddleware(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		logs := r.Context().Value(logKey).(*log.Entry)
 		session, err := store.Get(r, sessionName)
 		if err != nil {
 			log.WithError(err).Error("bad session")
@@ -188,6 +189,18 @@ func sessionMiddleware(h http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		r = r.WithContext(context.WithValue(r.Context(), sessionKey, session))
+
+		mapString := make(map[string]string)
+		for key, value := range session.Values {
+			strKey := fmt.Sprintf("%v", key)
+			strValue := fmt.Sprintf("%v", value)
+			mapString[strKey] = strValue
+		}
+		logs = logs.WithFields(log.Fields{
+			"auth": mapString,
+		})
+
+		r = r.WithContext(context.WithValue(r.Context(), logKey, logs))
 		h(w, r)
 	}
 }
@@ -201,27 +214,3 @@ func loggingMiddleware(h http.HandlerFunc) http.HandlerFunc {
 		h(w, r)
 	}
 }
-
-// func logWithContext(r *http.Request) *log.Entry {
-// 	logs := log.WithField("", "") // not sure how to initialise logs otherwise
-// 	if os.Getenv("UP_STAGE") != "" {
-// 		logs = log.WithFields(log.Fields{
-// 			"id": r.Header.Get("X-Request-Id"),
-// 		})
-// 	}
-// 	// This could be retrieved from context
-// 	session, err := store.Get(r, sessionName)
-// 	if err == nil {
-// 		// https://stackoverflow.com/a/48226206/4534
-// 		mapString := make(map[string]string)
-// 		for key, value := range session.Values {
-// 			strKey := fmt.Sprintf("%v", key)
-// 			strValue := fmt.Sprintf("%v", value)
-// 			mapString[strKey] = strValue
-// 		}
-// 		return logs.WithFields(log.Fields{
-// 			"auth": mapString,
-// 		})
-// 	}
-// 	return logs
-// }

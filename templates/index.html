@@ -1,3 +1,7 @@
 {{template "header" .}}
+{{ if .Session.ID }}
+<h2><a href="/logout"><button type="button">Log out</button></a></h2>
+{{ else }}
 <h2><a href="/admin"><button type="button">Admin page</button></a></h2>
+{{ end }}
 {{template "footer"}}

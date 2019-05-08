@@ -13,4 +13,9 @@ func TestRoutes(t *testing.T) {
 		Run(BasicEngine(), func(r gofight.HTTPResponse, rq gofight.HTTPRequest) {
 			assert.Contains(t, r.Body.String(), "/google/login")
 		})
+	r.GET("/").
+		Run(BasicEngine(), func(r gofight.HTTPResponse, rq gofight.HTTPRequest) {
+			assert.Contains(t, r.Body.String(), "Admin page")
+		})
+
 }

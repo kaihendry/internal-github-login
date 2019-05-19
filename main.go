@@ -14,6 +14,7 @@ import (
 	"github.com/dghubble/gologin/google"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/sessions"
+	"github.com/justinas/alice"
 	"golang.org/x/oauth2"
 	googleOAuth2 "golang.org/x/oauth2/google"
 )
@@ -45,9 +46,12 @@ func main() {
 // BasicEngine sets up the routes
 func BasicEngine() http.Handler {
 	app := mux.NewRouter()
-	app.HandleFunc("/", loggingMiddleware(sessionMiddleware(indexHandler)))
-	app.HandleFunc("/admin", loggingMiddleware(requireLogin(sessionMiddleware(adminHandler))))
-	app.HandleFunc("/logout", loggingMiddleware(logoutHandler))
+	commonHandlers := alice.New(loggingMiddleware, sessionMiddleware)
+	adminHandlers := alice.New(loggingMiddleware, requireLogin, sessionMiddleware)
+
+	app.Handle("/", commonHandlers.ThenFunc(indexHandler))
+	app.Handle("/admin", adminHandlers.ThenFunc(adminHandler))
+	app.Handle("/logout", commonHandlers.ThenFunc(logoutHandler))
 
 	// Setup for local development with https://github.com/codegangsta/gin
 	redirectURL := "http://localhost:3000/google/callback"
@@ -158,10 +162,9 @@ func logoutHandler(w http.ResponseWriter, req *http.Request) {
 	http.Redirect(w, req, "/", http.StatusFound)
 }
 
-// <schaeffer> hendry: you should generally take an http.Handler, as http.HandlerFunc implements http.Handler whereas the inverse isn't true
 // func requireLogin(next http.Handler) http.Handler {
-func requireLogin(h http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func requireLogin(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		session, err := store.Get(r, sessionName)
 		// If ID is nil, we assume Google auth has NOT been performed
 		if err != nil || session.Values["ID"] == nil {
@@ -175,12 +178,12 @@ func requireLogin(h http.HandlerFunc) http.HandlerFunc {
 		// } else {
 		// 	log.Infof("Who is %#v ?", session.Values["Name"])
 		// }
-		h(w, r)
-	}
+		h.ServeHTTP(w, r)
+	})
 }
 
-func sessionMiddleware(h http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func sessionMiddleware(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logs := r.Context().Value(logKey).(*log.Entry)
 		session, err := store.Get(r, sessionName)
 		if err != nil {
@@ -201,16 +204,16 @@ func sessionMiddleware(h http.HandlerFunc) http.HandlerFunc {
 		})
 
 		r = r.WithContext(context.WithValue(r.Context(), logKey, logs))
-		h(w, r)
-	}
+		h.ServeHTTP(w, r)
+	})
 }
 
-func loggingMiddleware(h http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func loggingMiddleware(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logs := log.WithFields(log.Fields{
-			"id": r.Header.Get("X-Request-Id"),
+			"requestID": r.Header.Get("X-Request-Id"),
 		})
 		r = r.WithContext(context.WithValue(r.Context(), logKey, logs))
-		h(w, r)
-	}
+		h.ServeHTTP(w, r)
+	})
 }

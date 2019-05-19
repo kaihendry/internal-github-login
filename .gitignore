@@ -2,3 +2,4 @@ up.json
 server
 gin-bin
 .env
+vendor
